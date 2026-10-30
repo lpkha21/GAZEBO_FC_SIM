@@ -6,8 +6,14 @@ PIDAxis pid[3];
 void pidReset(PIDAxis &pid) {
   pid.integral = 0;
   pid.dMinFilter = pid.dMinPercent;
+
   pid.setpointFiltered = 0.0f;
+  pid.prevSetpoint = 0.0f;
+  pid.dtermFilter = 0.0f;
+
+  pid.ffState = 0.0f;
   pid.prevPD = 0.0f;
+  pid.prevThrottle = 0.0f;
 }
 
 static void rotateVector(float v[3], float rotation[3]) {
@@ -74,7 +80,7 @@ void pidController(float output[4], float setpoint[3], float gyro[3], float dt,
     if (throttle > tpaBreakpoint) {
 
       float t = (throttle - tpaBreakpoint) / (1.0f - tpaBreakpoint);
-
+      t *= t;
       tpaFactor = 1.0f - t * tpaStrength;
     }
 
@@ -82,7 +88,7 @@ void pidController(float output[4], float setpoint[3], float gyro[3], float dt,
     /* P Term                                          */
     /* ------------------------------------------------ */
 
-    float P = pid[i].kp * error * tpaFactor;
+    float P = pid[i].kp * error;
 
     /* ------------------------------------------------ */
     /* Feedforward derivative                          */
@@ -102,13 +108,19 @@ void pidController(float output[4], float setpoint[3], float gyro[3], float dt,
 
     bool allowIterm = true;
 
-    if ((pid[i].integral > 0 && error > 0) ||
-        (pid[i].integral < 0 && error < 0)) {
-      allowIterm = false;
-    }
+    // if ((pid[i].integral > 0 && error > 0) ||
+    //     (pid[i].integral < 0 && error < 0)) {
+    //   allowIterm = false;
+    // }
+    float throttleAccel = (throttle - pid[i].prevThrottle) / dt;
+    pid[i].prevThrottle = throttle;
 
+    float antiGravity = 1.0f + pid[i].antiGravityGain * fabsf(throttleAccel);
     if (allowIterm) {
-      pid[i].integral += error * pid[i].ki * dt * relaxFactor;
+      if (i == 2) {
+        antiGravity = 1.0f;
+      }
+      pid[i].integral += error * pid[i].ki * dt * relaxFactor * antiGravity;
     }
 
     if (pid[i].integral > pid[i].itermLimit)
@@ -138,7 +150,8 @@ void pidController(float output[4], float setpoint[3], float gyro[3], float dt,
     float dMinGyro = fabsf(pid[i].dtermFilter) * pid[i].dMinGain;
     float dMinSetpoint = fabsf(setpointDerivative) * pid[i].dMinSetpointGain;
 
-    float dMinDrive = fmaxf(dMinGyro, dMinSetpoint);
+    float dMinDrive =
+        fmaxf(fabsf(pid[i].dtermFilter), fabsf(setpointDerivative) * 0.5f);
 
     float dMinFactor =
         pid[i].dMinPercent + (1.0f - pid[i].dMinPercent) * dMinDrive;
@@ -162,7 +175,7 @@ void pidController(float output[4], float setpoint[3], float gyro[3], float dt,
 
     pid[i].ffState += pid[i].ffAlpha * (setpointDerivative - pid[i].ffState);
 
-    float F = pid[i].kf * pid[i].ffState * tpaFactor;
+    float F = pid[i].kf * pid[i].ffState;
 
     /* ------------------------------------------------ */
     /* PD limiter (ArduPilot style)                    */

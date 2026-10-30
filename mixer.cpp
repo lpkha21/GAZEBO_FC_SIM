@@ -4,7 +4,8 @@
 #include <gz/sim/Util.hh>
 #include <gz/transport/Node.hh>
 
-void mixer(gz::transport::Node::Publisher &motorPub, float output[4]) {
+void mixer(gz::transport::Node::Publisher &motorPub, float output[4],
+           float motors[4]) {
 
   float roll_out = output[0];
   float pitch_out = output[1];
@@ -26,7 +27,7 @@ void mixer(gz::transport::Node::Publisher &motorPub, float output[4]) {
   mix[2] = roll_out - pitch_out + yaw_out;
   mix[3] = -roll_out + pitch_out + yaw_out;
 
-  float throttleLimit = 0.85f;
+  float throttleLimit = 0.8f;
   throttle = std::min(throttle, throttleLimit);
 
   float m1 = throttle + mix[0];
@@ -65,4 +66,9 @@ void mixer(gz::transport::Node::Publisher &motorPub, float output[4]) {
   msg.add_velocity(m3 * 1500); // front-left
   msg.add_velocity(m4 * 1500); // back-right
   motorPub.Publish(msg);
+
+  motors[0] = m1;
+  motors[1] = m2;
+  motors[2] = m3;
+  motors[3] = m4;
 }

@@ -34,7 +34,10 @@ typedef struct PIDAxis {
   float prevPD = 0;
 
   float pdLimit = 0.45f;
-  float slewLimit = 20.0f;
+  float slewLimit = 100.0f;
+
+  float prevThrottle = 0;
+  float antiGravityGain = 2.0;
 } PIDAxis;
 
 extern PIDAxis pid[3];

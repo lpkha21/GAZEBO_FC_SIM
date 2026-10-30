@@ -1,7 +1,10 @@
 #include "filter.h"
 #include "mixer.h"
 #include "pid.h"
+#include <cerrno>
+#include <cstring>
 #include <fcntl.h>
+#include <fstream>
 #include <gz/msgs/actuators.pb.h>
 #include <gz/msgs/imu.pb.h>
 #include <gz/plugin/Register.hh>
@@ -26,6 +29,7 @@
 
 using namespace gz;
 using namespace sim;
+std::ofstream logFile("flight_log.csv");
 
 class controller : public System,
                    public ISystemConfigure,
@@ -51,7 +55,15 @@ public:
     this->motorPub =
         this->node.Advertise<gz::msgs::Actuators>("/x500/command/motor_speed");
 
-    js_fd = open("/dev/input/event21", O_RDONLY | O_NONBLOCK);
+    const char *jsPath =
+        "/dev/input/by-id/"
+        "usb-OpenTX_Radiomaster_Boxer_Joystick_00000000001B-event-joystick";
+    js_fd = open(jsPath, O_RDONLY | O_NONBLOCK);
+    if (js_fd < 0)
+      gzerr << "Failed to open joystick " << jsPath << ": " << strerror(errno)
+            << "\n";
+    else
+      gzmsg << "Joystick opened: " << jsPath << "\n";
 
     if (js_fd < 0) {
       gzerr << "Failed to open joystick\n";
@@ -75,8 +87,8 @@ public:
     pid[ROLL].dMinSetpointGain = 0.01f;
     pid[PITCH].dMinSetpointGain = 0.01f;
 
-    pid[YAW].kp = 0.15f;
-    pid[YAW].ki = 0.08f;
+    pid[YAW].kp = 0.07f;
+    pid[YAW].ki = 0.06f;
     pid[YAW].kf = 0.0f;
     pid[YAW].kd = 0.0f;
     pid[YAW].itermRelaxGain = 0.001f;
@@ -89,13 +101,13 @@ public:
     float lpfQ = 0.707f;
     float notchQ = 5;
     float refreshRate = controlDt * 1e6;
-    biquadFilterInit(lowpassFilterX, FILTER_LPF, 100, refreshRate, lpfQ);
+    biquadFilterInit(lowpassFilterX, FILTER_LPF, 90, refreshRate, lpfQ);
     biquadFilterInit(notchFilterX, FILTER_NOTCH, 250, refreshRate, notchQ);
 
-    biquadFilterInit(lowpassFilterY, FILTER_LPF, 100, refreshRate, lpfQ);
+    biquadFilterInit(lowpassFilterY, FILTER_LPF, 90, refreshRate, lpfQ);
     biquadFilterInit(notchFilterY, FILTER_NOTCH, 250, refreshRate, notchQ);
 
-    biquadFilterInit(lowpassFilterZ, FILTER_LPF, 100, refreshRate, lpfQ);
+    biquadFilterInit(lowpassFilterZ, FILTER_LPF, 90, refreshRate, lpfQ);
     biquadFilterInit(notchFilterZ, FILTER_NOTCH, 250, refreshRate, notchQ);
 
     gzmsg << "Controller initialized\n";
@@ -114,6 +126,8 @@ public:
     if (dt <= 0) {
       return;
     }
+    static float time = 0;
+    time += 0.001; // if running ~1kHz
 
     controlTimer += dt;
     rcTimer += dt;
@@ -156,7 +170,15 @@ public:
     float sp[3] = {rc[0] * RATE, rc[1] * RATE, -rc[3] * RATE};
     pidController(output, sp, gyro, controlDt, throttle);
     output[3] = throttle;
-    mixer(motorPub, output);
+    float motors[4];
+    mixer(motorPub, output, motors);
+
+    logFile << time << "," << throttle << "," << output[0] << "," << output[1]
+            << "," << output[2] << "," << motors[0] << "," << motors[1] << ","
+            << motors[2] << "," << motors[3] << "\n";
+    if ((int)(time * 1000) % 200 == 0) {
+      logFile.flush();
+    }
 
     // gzmsg << m1 << std::endl;
     // gzmsg << -rc[PITCH] << " " << gy << "\n";
